@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  noctilucent-app:
+    build: .
+    container_name: smart-parser-ui
+    ports:
+      - "8501:8501"
+    environment:
+      # This tells the container how to escape Docker and find Ollama on your laptop
+      # (Note: If you are on Linux, change this to OLLAMA_HOST=localhost and add network_mode: "host")
+      - OLLAMA_HOST=host.docker.internal
+    restart: unless-stopped
