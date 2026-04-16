@@ -258,10 +258,13 @@ if page == cfg.TITLE_COVER:
             safe_image("ael_logo.png")
             
         st.write("<br><br>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px;'>DEVELOPED BY</p>", unsafe_allow_html=True)
         
-        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; letter-spacing: 3px; font-size: 1.4rem; font-weight: 600; white-space: nowrap; margin-top: 5px;'>MUHAMMAD HAASHIR ISLAM</div>", unsafe_allow_html=True)
-
+        # --- UPDATED TEAM CREDITS ---
+        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px; letter-spacing: 2px;'>LEAD DEVELOPER</p>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; letter-spacing: 2px; font-size: 1.3rem; font-weight: 600; margin-top: 2px; margin-bottom: 15px;'>MUHAMMAD HAASHIR ISLAM</div>", unsafe_allow_html=True)
+        
+        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px; letter-spacing: 2px;'>PROJECT MEMBERS</p>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; font-size: 1rem; font-weight: 400; margin-top: 2px; letter-spacing: 1px;'>CHARLENE TAN YING JIE<br>GABRIEL LIM JUN HONG</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PAGE 1: DATA INGESTION ENGINE
@@ -280,16 +283,51 @@ elif page == cfg.TITLE_SIMULATION:
         severity_val = c2.slider("FAILURE SEVERITY", cfg.SEVERITY_MIN, cfg.SEVERITY_MAX, cfg.SEVERITY_DEFAULT)
         log_len = c3.slider("LOG LENGTH (CYCLES)", cfg.LOG_LENGTH_MIN, cfg.LOG_LENGTH_MAX, cfg.LOG_LENGTH_DEFAULT)
         
-        def trigger_generation(prof, sev, length):
-            st.session_state['files'] = generate_files(prof, sev, length)
-            st.session_state['results'] = [] 
-            st.session_state['ai_cache'] = {}
-            st.session_state['macro_plan'] = ""
-            st.session_state['chat_history'] = []
-            st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL # Reset to baseline
-            st.session_state['nav_radio'] = cfg.TITLE_DASHBOARD
+        if st.button("GENERATE SYNTHETIC PAYLOAD"):
+            with st.spinner("Compiling multi-format factory logs..."):
+                st.session_state['files'] = generate_files(profile, severity_val, log_len)
+                st.session_state['results'] = [] 
+                st.session_state['ai_cache'] = {}
+                st.session_state['macro_plan'] = ""
+                st.session_state['chat_history'] = []
+                st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL # Reset to baseline
+        
+        # Display the full logs ONLY if files have been generated
+        if st.session_state.get('files'):
+            st.success("SYNTHETIC DATA STREAMS GENERATED SUCCESSFULLY")
+            
+            with st.expander("VIEW FULL SYNTHETIC PAYLOAD (ALL 12 FORMATS)", expanded=True):
+                # Create 12 tabs for all generated streams
+                tabs = st.tabs([
+                    "JSON (A)", "JSON (B)", 
+                    "XML (A)", "XML (B)", 
+                    "CSV (A)", "CSV (B)", 
+                    "TEXT (A)", "TEXT (B)", 
+                    "SYSLOG (A)", "SYSLOG (B)", 
+                    "KV (A)", "KV (B)"
+                ])
+                
+                with tabs[0]: st.code(json.dumps(st.session_state['files']['JSON_A'], indent=2), language="json")
+                with tabs[1]: st.code(json.dumps(st.session_state['files']['JSON_B'], indent=2), language="json")
+                
+                with tabs[2]: st.code(st.session_state['files']['XML_A_DISPLAY'], language="xml")
+                with tabs[3]: st.code(st.session_state['files']['XML_B_DISPLAY'], language="xml")
+                
+                with tabs[4]: st.code("timestamp,id,vendor,val,fw,status\n" + "\n".join(st.session_state['files']['CSV_A']), language="csv")
+                with tabs[5]: st.code("timestamp,machine_code,vendor,pressure_reading,ch,status\n" + "\n".join(st.session_state['files']['CSV_B']), language="csv")
+                
+                with tabs[6]: st.code("\n".join(st.session_state['files']['TEXT_A']), language="text")
+                with tabs[7]: st.code("\n".join(st.session_state['files']['TEXT_B']), language="text")
+                
+                with tabs[8]: st.code("\n".join(st.session_state['files']['SYS_A']), language="text")
+                with tabs[9]: st.code("\n".join(st.session_state['files']['SYS_B']), language="text")
+                
+                with tabs[10]: st.code("\n".join(st.session_state['files']['KV_A']), language="text")
+                with tabs[11]: st.code("\n".join(st.session_state['files']['KV_B']), language="text")
 
-        st.button("EXECUTE GENERATION PROTOCOL", on_click=trigger_generation, args=(profile, severity_val, log_len))
+            if st.button("PUSH TO FACTORY DASHBOARD"):
+                st.session_state['force_nav_dashboard'] = True
+                st.rerun()
 
     # --- TAB 2: ZERO SHOT UPLOAD ---
     with tab_ext:
