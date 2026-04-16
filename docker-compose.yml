@@ -1,13 +1,16 @@
 version: '3.8'
 
 services:
-  noctilucent-app:
+  smart-parser-ui:
     build: .
     container_name: smart-parser-ui
     ports:
       - "8501:8501"
+    volumes:
+      # THE BIND MOUNT: This maps your current local folder directly to /app in the container.
+      # This guarantees Docker sees 'Configuration.py' exactly as it exists on your machine.
+      - .:/app
     environment:
-      # This tells the container how to escape Docker and find Ollama on your laptop
-      # (Note: If you are on Linux, change this to OLLAMA_HOST=localhost and add network_mode: "host")
-      - OLLAMA_HOST=host.docker.internal
+      # Ensures Python prints logs immediately to your terminal
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped

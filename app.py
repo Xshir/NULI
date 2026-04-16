@@ -6,48 +6,138 @@ import datetime
 import requests
 import time
 import re
+import os
 import xml.dom.minidom as minidom
 import xml.etree.ElementTree as ET
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
-import os # Add this import
+import Configuration as cfg
 
-# --- CONFIGURATION ---
-# Use environment variable for Docker, default to localhost for local testing
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
-OLLAMA_URL = f"http://{OLLAMA_HOST}:11434/api/generate"
-MODEL_NAME = "llama3"
+# ==========================================
+# PAGE SETUP & UI STYLING
+# ==========================================
+st.set_page_config(page_title=cfg.PAGE_TITLE, layout=cfg.PAGE_LAYOUT)
 
-# --- PAGE SETUP & UI STYLING ---
-st.set_page_config(page_title="Team Noctilucent: Intelligence Suite", layout="wide")
-
-st.markdown("""
+st.markdown(f"""
     <style>
-    /* Golden Sliders, Progress Bar, and Buttons */
-    .stSlider > div [data-baseweb="slider"] [role="slider"] { background-color: #FFD700 !important; }
-    .stSlider > div [data-baseweb="slider"] > div > div { background: #FFD700 !important; }
-    .stProgress > div > div > div > div { background-color: #FFD700 !important; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&display=swap');
+
+    .stApp {{
+        background: linear-gradient(135deg, {cfg.COLOR_BG_PRIMARY} 0%, {cfg.COLOR_BG_SECONDARY} 100%);
+        font-family: {cfg.FONT_MAIN} !important;
+        color: {cfg.COLOR_TEXT_MAIN} !important;
+    }}
     
-    /* Text Color Enhancements */
-    h1, h2, h3, .stMetric, [data-testid="stMetricValue"] { color: #FFD700 !important; }
+    h1, h2, h3, h4, h5, h6, [data-testid="stHeader"] {{
+        color: {cfg.COLOR_ACCENT_PLATINUM} !important;
+        font-weight: 600 !important;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+    }}
+
+    [data-testid="stWidgetLabel"] p, .st-emotion-cache-16idsys p, label {{
+        color: {cfg.COLOR_ACCENT_PLATINUM} !important;
+        font-size: 0.9rem !important;
+        letter-spacing: 0.5px;
+    }}
+
+    code, .stMetric, [data-testid="stMetricValue"], #timer {{
+        font-family: {cfg.FONT_MONO} !important;
+        color: {cfg.COLOR_ACCENT_CYAN} !important;
+    }}
+
+    .stSlider > div [data-baseweb="slider"] [role="slider"] {{ background-color: {cfg.COLOR_ACCENT_PLATINUM} !important; border: 2px solid {cfg.COLOR_BG_PRIMARY} !important; }}
+    .stSlider > div [data-baseweb="slider"] > div > div {{ background: {cfg.COLOR_ACCENT_PLATINUM} !important; }}
+    
+    .stProgress > div > div > div > div {{ background-color: {cfg.COLOR_ACCENT_CYAN} !important; }}
+
+    .stButton > button {{
+        background-color: transparent !important;
+        border: 1px solid {cfg.COLOR_ACCENT_CYAN} !important;
+        color: {cfg.COLOR_ACCENT_CYAN} !important;
+        border-radius: 2px;
+        transition: all 0.3s ease;
+        font-family: {cfg.FONT_MAIN} !important;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }}
+    .stButton > button:hover {{
+        background-color: {cfg.COLOR_ACCENT_CYAN} !important;
+        color: {cfg.COLOR_BG_PRIMARY} !important;
+    }}
+
+    [data-testid="stSidebar"] {{
+        background-color: {cfg.COLOR_BG_PRIMARY} !important;
+        border-right: 1px solid #003366;
+    }}
+
+    [data-testid="stDataFrame"] {{
+        font-family: {cfg.FONT_MONO} !important;
+    }}
+
+    /* CSS FIX FOR MITIGATION STRATEGY ALERTS */
+    [data-testid="stAlert"] {{
+        background-color: rgba(0, 229, 255, 0.05) !important;
+        border: 1px solid {cfg.COLOR_ACCENT_CYAN} !important;
+        color: {cfg.COLOR_ACCENT_PLATINUM} !important;
+    }}
+    [data-testid="stAlert"] p {{
+        color: {cfg.COLOR_ACCENT_PLATINUM} !important;
+        font-family: {cfg.FONT_MAIN} !important;
+        font-size: 1rem !important;
+    }}
+    [data-testid="stAlert"] svg {{
+        fill: {cfg.COLOR_ACCENT_CYAN} !important;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- STATE MANAGEMENT ---
+# ==========================================
+# STATE MANAGEMENT & NAVIGATION ROUTING
+# ==========================================
 if 'files' not in st.session_state: st.session_state['files'] = None
 if 'results' not in st.session_state: st.session_state['results'] = []
 if 'ai_cache' not in st.session_state: st.session_state['ai_cache'] = {}
 if 'macro_plan' not in st.session_state: st.session_state['macro_plan'] = ""
 if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
+if 'nav_radio' not in st.session_state: st.session_state['nav_radio'] = cfg.TITLE_COVER
+if 'active_threshold' not in st.session_state: st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL
 
-# --- 1. THE 10-FILE UNIVERSAL GENERATOR (Phase-Shift Physics) ---
+# --- NAVIGATION ROUTING INTERCEPTOR ---
+if st.session_state.get('force_nav_dashboard', False):
+    st.session_state['nav_radio'] = cfg.TITLE_DASHBOARD
+    st.session_state['force_nav_dashboard'] = False
+
+# --- SIDEBAR NAVIGATION ---
+with st.sidebar:
+    st.title("SYSTEM NAVIGATION")
+    page = st.radio("MODULE SELECT:", [cfg.TITLE_COVER, cfg.TITLE_SIMULATION, cfg.TITLE_DASHBOARD], key="nav_radio")
+    st.divider()
+    if st.button("CLEAR MEMORY & RESET"):
+        st.session_state.clear()
+        st.rerun()
+
+# ==========================================
+# HELPER FUNCTIONS & ENGINE LOGIC
+# ==========================================
+
+def safe_image(path, width=None):
+    if os.path.exists(path):
+        if width is not None:
+            st.image(path, width=width)
+        else:
+            # FIX: Using the legacy command for cross-version Docker compatibility
+            st.image(path, use_column_width=True)
+    else:
+        st.info(f"Missing Image: Save your logo as '{path}' in the same folder.")
+
 def generate_files(profile, severity, length=10):
     timestamp = datetime.datetime.now()
-    files = {"JSON_A": [], "JSON_B": [], "XML_A_RAW": [], "XML_B_RAW": [], "TEXT_A": [], "TEXT_B": [], "SYS_A": [], "SYS_B": [], "KV_A": [], "KV_B": []}
+    files = {"JSON_A": [], "JSON_B": [], "XML_A_RAW": [], "XML_B_RAW": [], "TEXT_A": [], "TEXT_B": [], "SYS_A": [], "SYS_B": [], "KV_A": [], "KV_B": [], "CSV_A": [], "CSV_B": []}
     root_a = ET.Element("ToolLog", {"Vendor": "Vendor_A"})
     root_b = ET.Element("SensorExport", {"Vendor": "Vendor_B"})
 
-    pressure_a, pressure_b = 0.9, 0.9
+    pressure_a, pressure_b = cfg.BASELINE_DEFAULT, cfg.BASELINE_DEFAULT
     
     for i in range(length):
         timestamp += datetime.timedelta(seconds=10)
@@ -62,21 +152,22 @@ def generate_files(profile, severity, length=10):
             if i > (length // 4) * 3: pressure_b += random.uniform(3.0, 5.0)
             else: pressure_b += random.uniform(-0.02, 0.02)
         elif profile == "Ghost Fault": 
-            pressure_a = 0.9 + (random.choice([0, 2.0, 0.5, 3.1]) * (severity / 5))
-            pressure_b = 0.9 + (random.choice([0, 0, 1.0, 3.5]) * (severity / 5))
+            pressure_a = cfg.BASELINE_DEFAULT + (random.choice([0, 2.0, 0.5, 3.1]) * (severity / 5))
+            pressure_b = cfg.BASELINE_DEFAULT + (random.choice([0, 0, 1.0, 3.5]) * (severity / 5))
         else: 
             pressure_a += random.uniform(-0.02, 0.02)
             pressure_b += random.uniform(-0.02, 0.02)
 
         p_val_a, p_val_b = round(pressure_a, 3), round(pressure_b, 3)
-        status_a = "ALARM: VACUUM_FAULT" if p_val_a > 3.5 else "STATUS_OK"
-        status_b = "ALARM: VACUUM_FAULT" if p_val_b > 3.5 else "STATUS_OK"
+        status_a = "ALARM: VACUUM_FAULT" if p_val_a > cfg.THRESHOLD_CRITICAL else "STATUS_OK"
+        status_b = "ALARM: VACUUM_FAULT" if p_val_b > cfg.THRESHOLD_CRITICAL else "STATUS_OK"
 
         files["JSON_A"].append({"id": "MCH_A01", "time": ts_iso, "val": p_val_a, "fw": "v2.1"})
         files["TEXT_A"].append(f"[{ts_text}] ID:MCH_A01 VENDOR:Vendor_A VAL:{p_val_a}Pa FW:v2.1 {status_a}")
         files["SYS_A"].append(f"<14> {ts_iso} MCH_A01 VENDOR_A - - VAL:{p_val_a}Pa FW:v2.1 {status_a}")
         files["KV_A"].append(f"timestamp={ts_iso} ID=MCH_A01 vendor=Vendor_A Pressure={p_val_a} FW=v2.1 status={status_a}")
         files["XML_A_RAW"].append(f"<Entry><T>{ts_iso}</T><P>{p_val_a}</P></Entry>")
+        files["CSV_A"].append(f"{ts_iso},MCH_A01,Vendor_A,{p_val_a},v2.1,{status_a}")
         ea = ET.SubElement(root_a, "Entry"); ET.SubElement(ea, "T").text = ts_iso; ET.SubElement(ea, "P").text = str(p_val_a)
 
         files["JSON_B"].append({"machine_code": "MCH_B02", "timestamp": ts_iso, "pressure_reading": p_val_b, "ch": "C1"})
@@ -84,13 +175,13 @@ def generate_files(profile, severity, length=10):
         files["SYS_B"].append(f"<14> {ts_iso} MCH_B02 VENDOR_B - - Pressure={p_val_b}Pa CH=C1 {status_b}")
         files["KV_B"].append(f"timestamp={ts_iso} ID=MCH_B02 vendor=Vendor_B Pressure={p_val_b} CH=C1 status={status_b}")
         files["XML_B_RAW"].append(f"<Reading><DateTime>{ts_iso}</DateTime><Vacuum_Pa>{p_val_b}</Vacuum_Pa></Reading>")
+        files["CSV_B"].append(f"{ts_iso},MCH_B02,Vendor_B,{p_val_b},C1,{status_b}")
         eb = ET.SubElement(root_b, "Reading"); ET.SubElement(eb, "DateTime").text = ts_iso; ET.SubElement(eb, "Vacuum_Pa").text = str(p_val_b)
 
     files["XML_A_DISPLAY"] = minidom.parseString(ET.tostring(root_a)).toprettyxml(indent=" ")
     files["XML_B_DISPLAY"] = minidom.parseString(ET.tostring(root_b)).toprettyxml(indent=" ")
     return files
 
-# --- 2. ROBUST TRIAGE & CACHE EXTRACTION ---
 def robust_parse(content, vendor, format_type):
     data = {"timestamp": None, "tool_id": "N/A", "vendor": vendor, "category": "SENSOR", "severity": "INFO", "value": 0.0, "metadata_payload": {}, "ai_summary": "", "rca_diagnosis": "N/A"}
 
@@ -100,12 +191,16 @@ def robust_parse(content, vendor, format_type):
             data["timestamp"] = raw.get("time") or raw.get("timestamp")
             data["tool_id"] = raw.get("id") or raw.get("machine_code")
             data["value"] = float(raw.get("val") or raw.get("pressure_reading"))
-            data["metadata_payload"] = {k: v for k, v in raw.items() if k not in ["time", "timestamp", "val", "pressure_reading", "id", "machine_code"]}
         elif format_type == "XML":
             tree = ET.fromstring(content)
             data["timestamp"] = tree.find("T").text if tree.find("T") is not None else tree.find("DateTime").text
             data["value"] = float(tree.find("P").text if tree.find("P") is not None else tree.find("Vacuum_Pa").text)
             data["tool_id"] = "MCH_A01" if vendor == "Vendor A" else "MCH_B02"
+        elif format_type == "CSV":
+            parts = content.split(",")
+            data["timestamp"] = parts[0]
+            data["tool_id"] = parts[1]
+            data["value"] = float(parts[3])
         elif format_type in ["TEXT", "SYS", "KV"]:
             ts_match = re.search(r"(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?)", content)
             val_match = re.search(r"(?:VAL:|Pressure=)([\d.]+)", content)
@@ -113,10 +208,6 @@ def robust_parse(content, vendor, format_type):
             if ts_match: data["timestamp"] = ts_match.group(1).replace(" ", "T")
             if val_match: data["value"] = float(val_match.group(1))
             if id_match: data["tool_id"] = id_match.group(1)
-            meta = {}
-            if fw := re.search(r"FW[=:]([\w.]+)", content): meta["fw"] = fw.group(1)
-            if ch := re.search(r"CH[=:]([\w\d]+)", content): meta["ch"] = ch.group(1)
-            data["metadata_payload"] = meta
     except Exception: pass
 
     cache_key = f"{vendor}_{data['timestamp']}"
@@ -124,13 +215,13 @@ def robust_parse(content, vendor, format_type):
         data.update(st.session_state['ai_cache'][cache_key])
         return data
 
-    if data["value"] <= 3.5:
+    if data["value"] <= cfg.THRESHOLD_CRITICAL:
         data.update({"category": "SENSOR", "severity": "INFO", "ai_summary": "Nominal operation.", "rca_diagnosis": "N/A"})
     else:
         data.update({"category": "ALARM", "severity": "CRITICAL"})
         try:
             prompt = f"Analyze anomaly: {content}. Return STRICT JSON with 'ai_summary' (one technical sentence) and 'rca_diagnosis' (e.g. 'Seal degradation in C1')."
-            resp = requests.post(OLLAMA_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"}, timeout=8)
+            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"}, timeout=8)
             ai_res = json.loads(re.sub(r'```json|```', '', resp.json().get("response", "")).strip())
             data["ai_summary"] = ai_res.get("ai_summary", "Critical vacuum fault.")
             data["rca_diagnosis"] = ai_res.get("rca_diagnosis", "Hardware failure.")
@@ -140,198 +231,438 @@ def robust_parse(content, vendor, format_type):
     st.session_state['ai_cache'][cache_key] = {"category": data["category"], "severity": data["severity"], "ai_summary": data["ai_summary"], "rca_diagnosis": data["rca_diagnosis"]}
     return data
 
-# --- SIDEBAR NAVIGATION ---
-with st.sidebar:
-    st.title("Navigation")
-    page = st.radio("Go to:", ["⚙️ Simulation Engine", "📊 Factory Dashboard"])
-    st.divider()
-    if st.button("🗑️ Clear Memory & Reset"):
-        st.session_state.clear()
-        st.rerun()
 
 # ==========================================
-# PAGE 1: SIMULATION ENGINE (The Backend)
+# PAGE 0: SYSTEM INITIALIZATION (Cover Page)
 # ==========================================
-if page == "⚙️ Simulation Engine":
-    st.header("⚙️ Synthetic Log Generator")
-    st.write("Generate highly realistic, format-diverse equipment logs for Vendor A and B.")
+if page == cfg.TITLE_COVER:
+    st.write("<br><br>", unsafe_allow_html=True)
     
-    c1, c2, c3 = st.columns(3)
-    profile = c1.selectbox("Failure Profile", ["Normal Ops", "Slow Leak", "Sudden Burst", "Ghost Fault"])
-    severity_val = c2.slider("Failure Severity", 1, 10, 5)
-    log_len = c3.number_input("Log Length", 5, 200, 15)
+    c_pad1, c_main, c_pad2 = st.columns([1, 1.5, 1])
     
-    if st.button("Generate 10 Files"):
-        st.session_state['files'] = generate_files(profile, severity_val, log_len)
-        st.session_state['results'] = [] 
-        st.session_state['ai_cache'] = {}
-        st.session_state['macro_plan'] = ""
-        st.session_state['chat_history'] = []
-        st.success("Files Generated successfully! Proceed to the Factory Dashboard.")
+    with c_main:
+        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; margin-bottom: 0px; font-size: 0.8rem;'>TRACK:</p>", unsafe_allow_html=True)
+        
+        m_pad1, m_logo, m_pad2 = st.columns([1, 3, 1])
+        with m_logo:
+            safe_image("micron_logo.png")
+        
+        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_ACCENT_CYAN}; font-size: 1.1rem; margin-top: 10px; font-weight: bold;'>NATIONAL STUDENT AI CHALLENGE 2026</p>", unsafe_allow_html=True)
+        
+        st.write("<br>", unsafe_allow_html=True)
+        
+        sub_pad1, sub_tp, sub_ael, sub_pad2 = st.columns([0.5, 1.5, 0.9, 0.5])
+        with sub_tp:
+            safe_image("tp_logo.png")
+        with sub_ael:
+            safe_image("ael_logo.png")
+            
+        st.write("<br><br>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px;'>DEVELOPED BY</p>", unsafe_allow_html=True)
+        
+        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; letter-spacing: 3px; font-size: 1.4rem; font-weight: 600; white-space: nowrap; margin-top: 5px;'>MUHAMMAD HAASHIR ISLAM</div>", unsafe_allow_html=True)
 
-    if st.session_state['files']:
-        st.subheader("Raw Buffer Comparison")
-        t1, t2, t3, t4, t5 = st.tabs(["JSON", "XML", "Text", "Syslog", "Key-Value"])
-        with t1:
-            col1, col2 = st.columns(2); col1.json(st.session_state['files']['JSON_A']); col2.json(st.session_state['files']['JSON_B'])
-        with t2:
-            col1, col2 = st.columns(2); col1.code(st.session_state['files']['XML_A_DISPLAY'], "xml"); col2.code(st.session_state['files']['XML_B_DISPLAY'], "xml")
-        with t3:
-            col1, col2 = st.columns(2); col1.text_area("Vendor A Text", "\n".join(st.session_state['files']['TEXT_A'])); col2.text_area("Vendor B Text", "\n".join(st.session_state['files']['TEXT_B']))
-        with t4:
-            col1, col2 = st.columns(2); col1.text_area("Vendor A Syslog", "\n".join(st.session_state['files']['SYS_A'])); col2.text_area("Vendor B Syslog", "\n".join(st.session_state['files']['SYS_B']))
-        with t5:
-            col1, col2 = st.columns(2); col1.text_area("Vendor A KV", "\n".join(st.session_state['files']['KV_A'])); col2.text_area("Vendor B KV", "\n".join(st.session_state['files']['KV_B']))
+
+# ==========================================
+# PAGE 1: DATA INGESTION ENGINE
+# ==========================================
+elif page == cfg.TITLE_SIMULATION:
+    st.header("01 - DATA INGESTION ENGINE")
+    
+    tab_synth, tab_ext = st.tabs(["SYNTHETIC GENERATION", "EXTERNAL ZERO-SHOT UPLOAD"])
+    
+    # --- TAB 1: SYNTHETIC ---
+    with tab_synth:
+        st.write("Generate high-fidelity, format-diverse equipment logs for target vendors.")
+        
+        c1, c2, c3 = st.columns(3)
+        profile = c1.selectbox("FAILURE PROFILE", ["Normal Ops", "Slow Leak", "Sudden Burst", "Ghost Fault"])
+        severity_val = c2.slider("FAILURE SEVERITY", cfg.SEVERITY_MIN, cfg.SEVERITY_MAX, cfg.SEVERITY_DEFAULT)
+        log_len = c3.slider("LOG LENGTH (CYCLES)", cfg.LOG_LENGTH_MIN, cfg.LOG_LENGTH_MAX, cfg.LOG_LENGTH_DEFAULT)
+        
+        def trigger_generation(prof, sev, length):
+            st.session_state['files'] = generate_files(prof, sev, length)
+            st.session_state['results'] = [] 
+            st.session_state['ai_cache'] = {}
+            st.session_state['macro_plan'] = ""
+            st.session_state['chat_history'] = []
+            st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL # Reset to baseline
+            st.session_state['nav_radio'] = cfg.TITLE_DASHBOARD
+
+        st.button("EXECUTE GENERATION PROTOCOL", on_click=trigger_generation, args=(profile, severity_val, log_len))
+
+    # --- TAB 2: ZERO SHOT UPLOAD ---
+    with tab_ext:
+        st.write("Upload undocumented fab CSV logs. The AI will autonomously deduce the schema and map the columns.")
+        uploaded_file = st.file_uploader("DROP MYSTERY LOG FILE (CSV) HERE", type=["csv"])
+        
+        if uploaded_file is not None:
+            import io
+            raw_bytes = uploaded_file.getvalue()
+            
+            try:
+                df_ext = pd.read_csv(io.BytesIO(raw_bytes))
+                headers = list(df_ext.columns)
+                sample_row = df_ext.iloc[0].astype(str).to_dict()
+                
+                st.markdown("**RAW SCHEMA DETECTED:**")
+                st.code(f"Headers: {headers}\nSample Row Data: {sample_row}", language="json")
+                
+                if st.button("INITIATE AUTONOMOUS SCHEMA MAPPING"):
+                    with st.spinner("AI deducing structural layout..."):
+                        
+                        mapping_prompt = f"""You are a strict data mapper. You must select the exact header names from the list below.
+Available Headers: {headers}
+Sample Data: {sample_row}
+
+Find the headers that best match these 3 categories:
+1. 'timestamp_col': The date/time column.
+2. 'eqp_col': The unique ID column (Prioritize 'Process_ID', 'Equipment_ID', or 'Wafer_ID').
+3. 'value_col': The primary metric (MUST be 'Vacuum_Pressure' if it exists, otherwise the main numerical value).
+
+Return ONLY a valid JSON object with exactly these 3 keys. Values must be exact strings from the Available Headers."""
+                        
+                        try:
+                            zs_resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": mapping_prompt, "stream": False, "format": "json"}, timeout=15)
+                            ai_map = json.loads(re.sub(r'```json|```', '', zs_resp.json().get("response", "")).strip())
+                            
+                            t_col = ai_map.get("timestamp_col", "UNKNOWN")
+                            e_col = ai_map.get("eqp_col", "UNKNOWN")
+                            v_col = ai_map.get("value_col", ai_map.get("vacuum_pressure_col", "UNKNOWN"))
+
+                            # --- TIMESTAMP VERIFIER & FALLBACK ---
+                            def is_valid_time(col):
+                                if col not in headers: return False
+                                try:
+                                    pd.to_datetime(sample_row.get(col))
+                                    return True
+                                except:
+                                    return False
+
+                            if not is_valid_time(t_col):
+                                t_col = next((h for h in headers if "time" in h.lower() or "date" in h.lower()), headers[0])
+                            
+                            if e_col not in headers:
+                                e_col = next((h for h in headers if "id" in h.lower() or "tool" in h.lower()), "UNKNOWN_TOOL")
+                            if v_col not in headers:
+                                v_col = next((h for h in headers if "pressure" in h.lower() or "val" in h.lower()), headers[-1])
+                            
+                            st.success(f"SCHEMA SUCCESSFULLY MAPPED: {{'timestamp_col': '{t_col}', 'eqp_col': '{e_col}', 'value_col': '{v_col}'}}")
+
+                            # --- ADAPTIVE Z-SCORE THRESHOLDING (3-Sigma) ---
+                            try:
+                                v_series = pd.to_numeric(df_ext[v_col], errors='coerce').dropna()
+                                if not v_series.empty:
+                                    v_mean = v_series.mean()
+                                    v_std = v_series.std()
+                                    # If standard deviation is 0, just add 20% to the mean to establish a safe threshold
+                                    active_thresh = round(v_mean + (3 * v_std), 3) if v_std > 0 else round(v_mean * 1.2, 3)
+                                else:
+                                    active_thresh = cfg.THRESHOLD_CRITICAL
+                            except Exception:
+                                active_thresh = cfg.THRESHOLD_CRITICAL
+                            
+                            st.session_state['active_threshold'] = active_thresh
+                            # -----------------------------------------------
+
+                            extracted_results = []
+                            for _, row in df_ext.iterrows():
+                                ts_val = str(row[t_col]) if t_col in df_ext.columns else datetime.datetime.now().isoformat()
+                                eqp_val = str(row[e_col]) if e_col in df_ext.columns else "UNKNOWN_TOOL"
+                                
+                                try:
+                                    val_val = float(row[v_col]) if v_col in df_ext.columns else 0.9
+                                except ValueError:
+                                    val_val = 0.9
+
+                                is_critical = val_val > active_thresh
+                                cat_val = "ALARM" if is_critical else "SENSOR"
+                                sev_val = "CRITICAL" if is_critical else "INFO"
+                                rca_val = f"Statistical Anomaly: Exceeds 3-Sigma threshold ({active_thresh})." if is_critical else "N/A"
+
+                                extracted_results.append({
+                                    "timestamp": ts_val,
+                                    "tool_id": eqp_val,
+                                    "vendor": "External_Vendor",
+                                    "category": cat_val,
+                                    "severity": sev_val,
+                                    "value": val_val,
+                                    "Confidence_Score": "100%",
+                                    "rca_diagnosis": rca_val
+                                })
+                            
+                            st.session_state['results'] = extracted_results
+                            st.session_state['files'] = None 
+                            st.session_state['macro_plan'] = ""
+                            st.session_state['chat_history'] = []
+                            
+                            st.session_state['force_nav_dashboard'] = True
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Schema mapping failure. Ensure LLM is running. Error: {e}")
+            except Exception as e:
+                st.error(f"Could not read CSV file. {e}")
+
 
 # ==========================================
 # PAGE 2: FACTORY DASHBOARD (The Frontend)
 # ==========================================
-elif page == "📊 Factory Dashboard":
-    st.header("📊 Intelligence & Analytics Dashboard")
+elif page == cfg.TITLE_DASHBOARD:
+    st.header(cfg.TITLE_DASHBOARD)
     
-    if not st.session_state['files']:
-        st.warning("No data found. Please generate logs in the Simulation Engine first.")
+    # Retrieve the dynamic threshold calculated during ingestion
+    active_thresh = st.session_state.get('active_threshold', cfg.THRESHOLD_CRITICAL)
+    
+    has_raw_files = st.session_state.get('files') is not None
+    has_processed_results = len(st.session_state.get('results', [])) > 0
+    
+    if not has_raw_files and not has_processed_results:
+        st.warning("Awaiting data stream. Initiate generation sequence in the Simulation Engine.")
     else:
-        col1, col2 = st.columns([1, 3])
-        batch = col1.slider("Process Batch Size", 1, len(st.session_state['files']['JSON_A']), min(10, len(st.session_state['files']['JSON_A'])))
-        
-        if col1.button("🚀 Begin Smart Normalization"):
-            timer_container = st.empty()
-            with timer_container:
-                components.html(f"""
-                    <div style="font-family: monospace; color: #FFD700; font-size: 20px; font-weight: bold; padding: 10px; border: 1px solid #FFD700; border-radius: 5px; background: #222;">
-                        LIVE ELAPSED TIME: <span id="timer">0.0</span>s
-                    </div>
-                    <script>
-                        var start = Date.now();
-                        setInterval(function() {{ document.getElementById('timer').innerHTML = ((Date.now() - start) / 1000).toFixed(1); }}, 100);
-                    </script>
-                """, height=70)
-
-            status_box = st.empty()
-            prog = st.progress(0)
-            results = []
+        if has_raw_files:
+            col1, col2 = st.columns([1, 3])
+            batch = col1.slider("INGESTION BATCH SIZE", 1, len(st.session_state['files']['JSON_A']), min(cfg.BATCH_SIZE_MAX_DISPLAY, len(st.session_state['files']['JSON_A'])))
             
-            start_time = time.time()
-            for i in range(batch):
-                idx = -(i + 1)
-                status_box.text(f"Processing Time Step {i+1} of {batch} across 10 distinct formats...")
-                results.append(robust_parse(st.session_state['files']['JSON_A'][idx], "Vendor A", "JSON"))
-                results.append(robust_parse(st.session_state['files']['JSON_B'][idx], "Vendor B", "JSON"))
-                results.append(robust_parse(st.session_state['files']['XML_A_RAW'][idx], "Vendor A", "XML"))
-                results.append(robust_parse(st.session_state['files']['XML_B_RAW'][idx], "Vendor B", "XML"))
-                results.append(robust_parse(st.session_state['files']['TEXT_A'][idx], "Vendor A", "TEXT"))
-                results.append(robust_parse(st.session_state['files']['TEXT_B'][idx], "Vendor B", "TEXT"))
-                results.append(robust_parse(st.session_state['files']['SYS_A'][idx], "Vendor A", "SYS"))
-                results.append(robust_parse(st.session_state['files']['SYS_B'][idx], "Vendor B", "SYS"))
-                results.append(robust_parse(st.session_state['files']['KV_A'][idx], "Vendor A", "KV"))
-                results.append(robust_parse(st.session_state['files']['KV_B'][idx], "Vendor B", "KV"))
-                prog.progress((i + 1) / batch)
+            if col1.button("INITIATE DATA NORMALIZATION"):
+                timer_container = st.empty()
+                
+                llm_trigger_count = 0
+                for i in range(batch):
+                    idx = -(i + 1)
+                    if st.session_state['files']['JSON_A'][idx]['val'] > active_thresh:
+                        llm_trigger_count += 1
+                    if st.session_state['files']['JSON_B'][idx]['pressure_reading'] > active_thresh:
+                        llm_trigger_count += 1
+                
+                true_calculated_time = (batch * 0.1) + (llm_trigger_count * 3.0)
+                est_time = int(true_calculated_time) + 20
+                
+                with timer_container:
+                    components.html(f"""
+                        <div style="font-family: {cfg.FONT_MONO}; padding: 15px; border: 1px solid {cfg.COLOR_ACCENT_CYAN}; border-radius: 5px; background: {cfg.COLOR_BG_PRIMARY}; display: flex; flex-direction: column; gap: 10px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold;">
+                                <span style="color: {cfg.COLOR_ACCENT_CYAN};">ELAPSED TIME: <span id="timer">0.0</span>s</span>
+                                <span style="color: {cfg.COLOR_ACCENT_PLATINUM};">ESTIMATED TIME: {est_time}.0s</span>
+                            </div>
+                            <div style="font-family: {cfg.FONT_MAIN}; font-size: 14px; color: {cfg.COLOR_TEXT_MAIN}; background: rgba(0, 229, 255, 0.05); padding: 10px; border-radius: 4px; border-left: 3px solid {cfg.COLOR_ACCENT_CYAN};">
+                                <strong style="color: {cfg.COLOR_ACCENT_CYAN}; letter-spacing: 1px;">FAB FACT: </strong> 
+                                <span id="fact-display" style="font-style: italic;">Initializing databanks...</span>
+                            </div>
+                        </div>
+                        <script>
+                            var start = Date.now();
+                            setInterval(function() {{ 
+                                document.getElementById('timer').innerHTML = ((Date.now() - start) / 1000).toFixed(1); 
+                            }}, 100);
 
-            timer_container.success(f"✅ Normalization complete in **{time.time() - start_time:.2f}s**")
-            status_box.empty()
-            st.session_state['results'] = results
-            st.session_state['macro_plan'] = "" 
-            st.session_state['chat_history'] = []
+                            var facts = {json.dumps(cfg.SEMICONDUCTOR_FACTS)};
+                            var factEl = document.getElementById('fact-display');
+                            
+                            factEl.innerHTML = facts[Math.floor(Math.random() * facts.length)];
+                            
+                            setInterval(function() {{
+                                factEl.style.opacity = 0; 
+                                setTimeout(function() {{
+                                    factEl.innerHTML = facts[Math.floor(Math.random() * facts.length)];
+                                    factEl.style.opacity = 1;
+                                }}, 200);
+                            }}, 5000); 
+                        </script>
+                    """, height=110)
 
-        if st.session_state['results']:
+                status_box = st.empty()
+                prog = st.progress(0)
+                results = []
+                
+                start_time = time.time()
+                for i in range(batch):
+                    idx = -(i + 1)
+                    status_box.text(f"Fusing Data Vectors: Array Index {i+1} / {batch} ...")
+                    
+                    formats_a = [
+                        robust_parse(st.session_state['files']['JSON_A'][idx], "Vendor A", "JSON"),
+                        robust_parse(st.session_state['files']['XML_A_RAW'][idx], "Vendor A", "XML"),
+                        robust_parse(st.session_state['files']['TEXT_A'][idx], "Vendor A", "TEXT"),
+                        robust_parse(st.session_state['files']['SYS_A'][idx], "Vendor A", "SYS"),
+                        robust_parse(st.session_state['files']['KV_A'][idx], "Vendor A", "KV"),
+                        robust_parse(st.session_state['files']['CSV_A'][idx], "Vendor A", "CSV")
+                    ]
+                    
+                    vals_a = [res["value"] for res in formats_a if res["value"] is not None]
+                    if vals_a:
+                        mode_val_a = max(set(vals_a), key=vals_a.count)
+                        conf_score_a = int((vals_a.count(mode_val_a) / len(formats_a)) * 100)
+                        base_a = formats_a[0]
+                        base_a["value"] = mode_val_a
+                        base_a["Confidence_Score"] = f"{conf_score_a}%"
+                        results.append(base_a)
+
+                    formats_b = [
+                        robust_parse(st.session_state['files']['JSON_B'][idx], "Vendor B", "JSON"),
+                        robust_parse(st.session_state['files']['XML_B_RAW'][idx], "Vendor B", "XML"),
+                        robust_parse(st.session_state['files']['TEXT_B'][idx], "Vendor B", "TEXT"),
+                        robust_parse(st.session_state['files']['SYS_B'][idx], "Vendor B", "SYS"),
+                        robust_parse(st.session_state['files']['KV_B'][idx], "Vendor B", "KV"),
+                        robust_parse(st.session_state['files']['CSV_B'][idx], "Vendor B", "CSV")
+                    ]
+                    
+                    vals_b = [res["value"] for res in formats_b if res["value"] is not None]
+                    if vals_b:
+                        mode_val_b = max(set(vals_b), key=vals_b.count)
+                        conf_score_b = int((vals_b.count(mode_val_b) / len(formats_b)) * 100)
+                        base_b = formats_b[0]
+                        base_b["value"] = mode_val_b
+                        base_b["Confidence_Score"] = f"{conf_score_b}%"
+                        results.append(base_b)
+                    
+                    prog.progress((i + 1) / batch)
+
+                timer_container.success(f"NORMALIZATION & FUSION COMPLETE [{time.time() - start_time:.2f}s]")
+                status_box.empty()
+                st.session_state['results'] = results
+                st.session_state['macro_plan'] = "" 
+                st.session_state['chat_history'] = []
+
+        if has_processed_results or (has_raw_files and st.session_state['results']):
             df = pd.DataFrame(st.session_state['results'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', errors='coerce', utc=True)
-            df = df.sort_values('timestamp', ascending=True)
+            
+            # --- GRAPH RESILIENCE: Drop unparseable dates to prevent graph from breaking ---
+            df = df.dropna(subset=['timestamp']).sort_values('timestamp', ascending=True)
             df['value'] = pd.to_numeric(df['value'], errors='coerce')
 
-            df['baseline'] = df.groupby('vendor')['value'].transform(lambda x: x.rolling(window=3, min_periods=1).mean().shift(1).fillna(0.9))
-            drift_condition = (abs(df['value'] - df['baseline']) / df['baseline'] > 0.15) & (df['value'] <= 3.5)
-            df['drift_warning'] = drift_condition.map({True: "⚠️ Drift", False: "Normal"})
-            df['yield_scrap_est'] = df.apply(lambda row: round((row['value'] - 3.5) * 12.5, 1) if row['category'] == 'ALARM' else 0, axis=1)
+            df['baseline'] = df.groupby('vendor')['value'].transform(lambda x: x.rolling(window=3, min_periods=1).mean().shift(1).fillna(cfg.BASELINE_DEFAULT))
+            drift_condition = (abs(df['value'] - df['baseline']) / df['baseline'] > cfg.DRIFT_TOLERANCE) & (df['value'] <= active_thresh)
+            df['drift_warning'] = drift_condition.map({True: "Drift Detected", False: "Nominal"})
+            
+            # Use dynamic active_thresh for yield calculation
+            df['yield_scrap_est'] = df.apply(lambda row: round((row['value'] - active_thresh) * cfg.YIELD_SCRAP_COEF, 1) if row['category'] == 'ALARM' else 0, axis=1)
 
-            # --- PLOTLY DYNAMIC CHART ---
-            st.subheader("📈 Dynamic Drift & Anomaly Matrix")
+            st.subheader("DYNAMIC DRIFT & ANOMALY MATRIX")
             fig = go.Figure()
-            for vendor in ['Vendor A', 'Vendor B']:
+            
+            unique_vendors = df['vendor'].unique()
+            for vendor in unique_vendors:
                 v_df = df[df['vendor'] == vendor]
-                fig.add_trace(go.Scatter(x=v_df['timestamp'], y=v_df['value'], mode='lines', name=vendor))
-                anomalies = v_df[v_df['value'] > 3.5]
+                line_color = cfg.COLOR_ACCENT_CYAN if vendor == 'Vendor A' else (cfg.COLOR_TEXT_MAIN if vendor == 'Vendor B' else '#FFD700')
+                
+                fig.add_trace(go.Scatter(x=v_df['timestamp'], y=v_df['value'], mode='lines', name=vendor, line=dict(color=line_color)))
+                anomalies = v_df[v_df['value'] > active_thresh]
                 if not anomalies.empty:
                     fig.add_trace(go.Scatter(x=anomalies['timestamp'], y=anomalies['value'], mode='markers', 
-                                             marker=dict(color='#FFA500', size=12, line=dict(color='red', width=2)), 
-                                             name=f"{vendor} Anomaly Event"))
+                                             marker=dict(color=cfg.COLOR_WARN_AMBER, size=12, line=dict(color=cfg.COLOR_DANGER_RED, width=2)), 
+                                             name=f"{vendor} Critical Event"))
 
-            fig.add_hline(y=3.5, line_dash="dash", line_color="red", annotation_text="Critical Action Threshold (3.5 Pa)")
-            fig.update_layout(template="plotly_dark", xaxis_title="Timestamp", yaxis_title="Vacuum Pressure (Pa)", height=500)
+            # Dynamic Horizontal Line Placement based on the adaptive threshold
+            fig.add_hline(y=active_thresh, line_dash="dash", line_color=cfg.COLOR_DANGER_RED, annotation_text=f"CRITICAL ACTION THRESHOLD ({active_thresh})")
+            fig.update_layout(template="plotly_dark", plot_bgcolor=cfg.COLOR_BG_PRIMARY, paper_bgcolor=cfg.COLOR_BG_PRIMARY, xaxis_title="TIMESTAMP", yaxis_title="METRIC VALUE", height=500)
             st.plotly_chart(fig, use_container_width=True)
 
-            # --- MACRO ACTION PLAN ---
             alarms_df = df[df['category'] == 'ALARM'].drop_duplicates(subset=['rca_diagnosis'])
             if not alarms_df.empty:
                 st.divider()
-                st.subheader("🚨 Executive Macro Mitigation Plan")
-                if st.button("Generate Mitigation Strategy from RCAs"):
-                    with st.spinner("Aggregating faults and consulting AI Chief Engineer..."):
+                st.subheader("EXECUTIVE MACRO MITIGATION PLAN")
+                if st.button("GENERATE MITIGATION STRATEGY"):
+                    with st.spinner("Compiling structural analysis..."):
                         faults = " | ".join(alarms_df['rca_diagnosis'].astype(str).tolist())
-                        prompt = f"You are a fab manager. Based on these concurrent vacuum tool faults: [{faults}], generate a concise, 3-step physical mitigation plan for the floor technicians. Do not use markdown."
+                        prompt = f"You are a fab manager. Based on these concurrent faults: [{faults}], generate a concise, 3-step physical mitigation plan for the floor technicians. Do not use markdown."
                         try:
-                            resp = requests.post(OLLAMA_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=15)
+                            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False}, timeout=15)
                             st.session_state['macro_plan'] = resp.json().get("response", "Error generating plan.")
                         except Exception:
                             st.session_state['macro_plan'] = "Macro Plan generation timed out. Local LLM may be busy."
                 if st.session_state['macro_plan']: st.info(st.session_state['macro_plan'])
 
-            # --- PERFORMANCE DASHBOARD ---
             st.divider()
             m1, m2, m3 = st.columns(3)
             alarms = len(df[df['category'] == 'ALARM'])
             availability = ((len(df) - alarms) / len(df)) * 100 if len(df) > 0 else 100
-            m1.metric("Tool Availability", f"{availability:.1f}%")
-            m2.metric("Predictive Drift Warnings", len(df[df['drift_warning'] == "⚠️ Drift"]))
-            m3.metric("Estimated Yield Loss", f"{df['yield_scrap_est'].sum():.1f} Units", delta="-High Impact" if df['yield_scrap_est'].sum() > 50 else None, delta_color="inverse")
+            drift_count = len(df[df['drift_warning'] == "Drift Detected"])
+            scrap_est = df['yield_scrap_est'].sum()
+            
+            m1.metric("TOOL AVAILABILITY", f"{availability:.1f}%")
+            m2.metric("PREDICTIVE DRIFT EVENTS", drift_count)
+            m3.metric("ESTIMATED SCRAP", f"{scrap_est:.1f} Units")
 
-            # --- UNIFIED TABLE & EXPORT ---
-            st.subheader("Unified Intelligence Table")
-            cols = ['timestamp', 'tool_id', 'vendor', 'category', 'severity', 'value', 'drift_warning', 'rca_diagnosis', 'yield_scrap_est']
-            df_display = df.reindex(columns=cols).fillna("N/A")
+            st.subheader("UNIFIED INTELLIGENCE SCHEMA")
+            
+            with st.expander("VIEW SEMI E30/GEM TERMINOLOGY GLOSSARY"):
+                st.markdown(f"""
+                <div style='color: {cfg.COLOR_ACCENT_PLATINUM}; font-family: {cfg.FONT_MAIN}; font-size: 0.9rem;'>
+                <strong>EQP_ID (Equipment ID):</strong> The unique identifier for the specific manufacturing tool or machine.<br><br>
+                <strong>CEID_Class (Collection Event ID):</strong> The classification of the event type (e.g., standard SENSOR telemetry vs. a critical ALARM).<br><br>
+                <strong>SVID_Value (Status Variable ID):</strong> The actual numerical reading extracted from the tool's sensor log.<br><br>
+                <strong>FDC_Diagnosis (Fault Detection and Classification):</strong> The root cause analysis or assigned fault category determined by the AI Copilot.
+                </div>
+                """, unsafe_allow_html=True)
+            
+            display_mapping = {
+                'timestamp': 'Timestamp',
+                'tool_id': 'EQP_ID',
+                'vendor': 'Vendor',
+                'category': 'CEID_Class',
+                'severity': 'Severity',
+                'value': 'SVID_Value',
+                'Confidence_Score': 'Confidence_Score',
+                'drift_warning': 'Drift_Status',
+                'rca_diagnosis': 'FDC_Diagnosis',
+                'yield_scrap_est': 'Yield_Scrap_Est'
+            }
+            
+            df_display = df.rename(columns=display_mapping)
+            cols = list(display_mapping.values())
+            df_display = df_display.reindex(columns=cols).fillna("N/A")
+            
             c_table, c_btn = st.columns([8, 1])
             c_table.dataframe(df_display, use_container_width=True)
             csv = df_display.to_csv(index=False).encode('utf-8')
-            c_btn.download_button("📥 Export CSV", data=csv, file_name="normalized_fab_logs.csv", mime="text/csv")
+            c_btn.download_button("EXPORT CSV", data=csv, file_name="normalized_fab_logs.csv", mime="text/csv")
 
-            # --- FACTORY AI COPILOT (STRICT RAG UPGRADE) ---
             st.divider()
-            st.subheader("🤖 Factory AI Copilot")
-            st.caption("Ask questions about the normalized factory data, tool performance, and root causes.")
+            st.subheader(cfg.TITLE_COPILOT)
+            st.caption("Query normalized data vectors via structural LLM logic.")
 
             for msg in st.session_state['chat_history']:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
-            if user_q := st.chat_input("E.g., At what time did Vendor A's machine start to fail?"):
+            if user_q := st.chat_input("Enter diagnostic query parameter..."):
                 st.session_state['chat_history'].append({"role": "user", "content": user_q})
                 with st.chat_message("user"): st.markdown(user_q)
 
                 with st.chat_message("assistant"):
-                    with st.spinner("Analyzing pre-processed factory context..."):
+                    with st.spinner("Analyzing parameters..."):
                         
                         context_blocks = []
-                        alarm_rows = df_display[df_display['category'] == 'ALARM']
+                        context_blocks.append("=== SYSTEM-WIDE ANALYTICS (REAL-TIME) ===")
+                        context_blocks.append(f"Current Tool Availability: {availability:.1f}%")
+                        context_blocks.append(f"Predictive Drift Events Flagged: {drift_count}")
+                        if has_raw_files:
+                            context_blocks.append(f"Current Batch Size: {batch} time steps")
+                        context_blocks.append(f"Estimated Wafer Scrap: {scrap_est:.1f} Units")
+                        context_blocks.append(f"Estimated Financial Loss: ${scrap_est * cfg.WAFER_UNIT_COST:,.2f}") 
+                        context_blocks.append(f"Action Threshold: {active_thresh:.2f}")
+                        context_blocks.append("=========================================\n")
+
+                        alarm_rows = df_display[df_display['CEID_Class'] == 'ALARM']
                         if alarm_rows.empty:
                             context_blocks.append("No critical alarms detected in this batch.")
                         else:
-                            unique_alarms = alarm_rows.drop_duplicates(subset=['timestamp', 'vendor'])
+                            unique_alarms = alarm_rows.drop_duplicates(subset=['Timestamp', 'Vendor'])
                             for _, row in unique_alarms.iterrows():
-                                context_blocks.append(f"At exact time {row['timestamp']}, {row['vendor']} (Tool: {row['tool_id']}) triggered an ALARM with pressure spiking to {row['value']} Pa. Root cause: {row['rca_diagnosis']}.")
+                                context_blocks.append(f"At exact time {row['Timestamp']}, {row['Vendor']} (Tool: {row['EQP_ID']}) triggered an ALARM with pressure spiking to {row['SVID_Value']} Pa. Root cause: {row['FDC_Diagnosis']}.")
                         
-                        info_rows = df_display[df_display['category'] == 'INFO']
+                        info_rows = df_display[df_display['CEID_Class'] == 'INFO']
                         if not info_rows.empty:
-                            context_blocks.append(f"There were {len(info_rows)} normal operational events recorded between {info_rows['timestamp'].min()} and {info_rows['timestamp'].max()}.")
+                            context_blocks.append(f"There were {len(info_rows)} normal operational events recorded between {info_rows['Timestamp'].min()} and {info_rows['Timestamp'].max()}.")
 
-                        # XML Demarcation for the LLM
                         clean_context = "<FACTORY_DATA>\n" + "\n".join(context_blocks) + "\n</FACTORY_DATA>"
                         
-                        # The Penalty Prompt
-                        copilot_prompt = f"""You are Team Noctilucent's strict Factory Diagnostic AI. 
-You MUST answer the user's question using ONLY the verified data enclosed in the <FACTORY_DATA> tags below.
-If the answer is not explicitly stated in the tags, reply "I cannot find this information in the current log batch."
-Under NO circumstances should you invent dates, times, vendors, or diagnoses.
+                        copilot_prompt = f"""You are the internal Fab Diagnostic AI. 
+You MUST answer the user's question using ONLY the verified data and computed metrics enclosed in the <FACTORY_DATA> tags below.
+If the user asks about a failure, alarm, or metric that is not present in the <FACTORY_DATA>, explicitly state that the event did not occur.
+Under NO circumstances should you invent dates, times, vendors, diagnoses, or metric calculations.
 
 {clean_context}
 
@@ -339,18 +670,17 @@ User Question: {user_q}
 Be direct, factual, and concise."""
                         
                         try:
-                            # THE FIX: Zero Temperature Payload
-                            resp = requests.post(OLLAMA_URL, json={
-                                "model": MODEL_NAME, 
+                            resp = requests.post(cfg.OLLAMA_URL, json={
+                                "model": cfg.MODEL_NAME, 
                                 "prompt": copilot_prompt, 
                                 "stream": False,
                                 "options": {"temperature": 0.0}
                             }, timeout=15)
                             
-                            answer = resp.json().get("response", "Error connecting to local LLM.")
+                            answer = resp.json().get("response", "Connection timeout to logic core.")
                             st.markdown(answer)
                             st.session_state['chat_history'].append({"role": "assistant", "content": answer})
                         except Exception:
-                            err_msg = "Copilot request timed out. Make sure the local LLM is running."
+                            err_msg = "Copilot request timeout. Verify LLM node status."
                             st.error(err_msg)
                             st.session_state['chat_history'].append({"role": "assistant", "content": err_msg})
