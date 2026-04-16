@@ -657,21 +657,26 @@ elif page == cfg.TITLE_DASHBOARD:
             csv = df_display.to_csv(index=False).encode('utf-8')
             c_btn.download_button("EXPORT CSV", data=csv, file_name="normalized_fab_logs.csv", mime="text/csv")
 
+            # --- FACTORY AI COPILOT ---
             st.divider()
             st.subheader(cfg.TITLE_COPILOT)
-            st.caption("Query normalized data vectors via structural LLM logic.")
+            st.caption("Query normalized data vectors or ask general knowledge questions.")
 
+            # Render existing chat history
             for msg in st.session_state['chat_history']:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
-            if user_q := st.chat_input("Enter diagnostic query parameter..."):
+            if user_q := st.chat_input("Enter diagnostic query or general question..."):
+                # Append user question to UI
                 st.session_state['chat_history'].append({"role": "user", "content": user_q})
-                with st.chat_message("user"): st.markdown(user_q)
+                with st.chat_message("user"): 
+                    st.markdown(user_q)
 
                 with st.chat_message("assistant"):
                     with st.spinner("Analyzing parameters..."):
                         
+                        # Build the contextual factory data
                         context_blocks = []
                         context_blocks.append("=== SYSTEM-WIDE ANALYTICS (REAL-TIME) ===")
                         context_blocks.append(f"Current Tool Availability: {availability:.1f}%")
@@ -689,36 +694,53 @@ elif page == cfg.TITLE_DASHBOARD:
                         else:
                             unique_alarms = alarm_rows.drop_duplicates(subset=['Timestamp', 'Vendor'])
                             for _, row in unique_alarms.iterrows():
-                                context_blocks.append(f"At exact time {row['Timestamp']}, {row['Vendor']} (Tool: {row['EQP_ID']}) triggered an ALARM with pressure spiking to {row['SVID_Value']} Pa. Root cause: {row['FDC_Diagnosis']}.")
+                                context_blocks.append(f"At exact time {row['Timestamp']}, {row['Vendor']} (Tool: {row['EQP_ID']}) triggered an ALARM with metric spiking to {row['SVID_Value']}. Root cause: {row['FDC_Diagnosis']}.")
                         
                         info_rows = df_display[df_display['CEID_Class'] == 'INFO']
                         if not info_rows.empty:
-                            context_blocks.append(f"There were {len(info_rows)} normal operational events recorded between {info_rows['Timestamp'].min()} and {info_rows['Timestamp'].max()}.")
+                            context_blocks.append(f"There were {len(info_rows)} normal operational events recorded.")
 
-                        clean_context = "<FACTORY_DATA>\n" + "\n".join(context_blocks) + "\n</FACTORY_DATA>"
+                        clean_context = "\n".join(context_blocks)
                         
-                        copilot_prompt = f"""You are the internal Fab Diagnostic AI. 
-You MUST answer the user's question using ONLY the verified data and computed metrics enclosed in the <FACTORY_DATA> tags below.
-If the user asks about a failure, alarm, or metric that is not present in the <FACTORY_DATA>, explicitly state that the event did not occur.
-Under NO circumstances should you invent dates, times, vendors, diagnoses, or metric calculations.
+                        # --- THE DUAL-MODE PROMPT ---
+                        copilot_prompt = f"""You are the advanced Fab Diagnostic AI Copilot. You are highly intelligent, helpful, and conversational.
 
+=== LIVE FACTORY DATA STREAM ===
 {clean_context}
+================================
 
 User Question: {user_q}
-Be direct, factual, and concise."""
+
+INSTRUCTIONS:
+1. FACTORY QUERIES: If the user asks about the factory data, alarms, or status, answer using ONLY the Live Factory Data Stream above.
+2. GENERAL QUERIES: If the user asks a general question (like math, greetings, coding, or science), completely ignore the factory data and answer it normally and politely.
+3. ALWAYS output a text response. Never remain silent.
+"""
                         
                         try:
+                            # Temperature raised to 0.5 to allow for conversational flexibility
                             resp = requests.post(cfg.OLLAMA_URL, json={
                                 "model": cfg.MODEL_NAME, 
                                 "prompt": copilot_prompt, 
                                 "stream": False,
-                                "options": {"temperature": 0.0}
+                                "options": {"temperature": 0.5}
                             }, timeout=15)
                             
-                            answer = resp.json().get("response", "Connection timeout to logic core.")
+                            # Safely extract the response and strip whitespace
+                            answer = resp.json().get("response", "").strip()
+                            
+                            # --- THE FAILSAFE SHIELD ---
+                            if not answer:
+                                answer = "I processed your request, but my logic core returned an empty response. Could you try rephrasing that?"
+                            
                             st.markdown(answer)
                             st.session_state['chat_history'].append({"role": "assistant", "content": answer})
-                        except Exception:
-                            err_msg = "Copilot request timeout. Verify LLM node status."
+                            
+                        except requests.exceptions.RequestException as e:
+                            err_msg = f"Connection error to AI Core. Is Docker bridging correctly? Error: {e}"
+                            st.error(err_msg)
+                            st.session_state['chat_history'].append({"role": "assistant", "content": err_msg})
+                        except Exception as e:
+                            err_msg = f"An unexpected error occurred in the logic core: {e}"
                             st.error(err_msg)
                             st.session_state['chat_history'].append({"role": "assistant", "content": err_msg})
