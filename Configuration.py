@@ -31,7 +31,7 @@ WAFER_UNIT_COST = 500             # Estimated dollar value per scrapped unit
 
 # SIMULATION LIMITS
 LOG_LENGTH_MIN = 10
-LOG_LENGTH_MAX = 50
+LOG_LENGTH_MAX = 200
 LOG_LENGTH_DEFAULT = 10
 
 SEVERITY_MIN = 1

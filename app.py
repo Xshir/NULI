@@ -7,6 +7,7 @@ import requests
 import time
 import re
 import os
+import sqlite3
 import xml.dom.minidom as minidom
 import xml.etree.ElementTree as ET
 import streamlit.components.v1 as components
@@ -96,12 +97,12 @@ st.markdown(f"""
 # STATE MANAGEMENT & NAVIGATION ROUTING
 # ==========================================
 if 'files' not in st.session_state: st.session_state['files'] = None
-if 'results' not in st.session_state: st.session_state['results'] = []
 if 'ai_cache' not in st.session_state: st.session_state['ai_cache'] = {}
 if 'macro_plan' not in st.session_state: st.session_state['macro_plan'] = ""
 if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
 if 'nav_radio' not in st.session_state: st.session_state['nav_radio'] = cfg.TITLE_COVER
 if 'active_threshold' not in st.session_state: st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL
+if 'db_path' not in st.session_state: st.session_state['db_path'] = "/tmp/factory_logs.db"
 
 # --- NAVIGATION ROUTING INTERCEPTOR ---
 if st.session_state.get('force_nav_dashboard', False):
@@ -114,6 +115,9 @@ with st.sidebar:
     page = st.radio("MODULE SELECT:", [cfg.TITLE_COVER, cfg.TITLE_SIMULATION, cfg.TITLE_DASHBOARD], key="nav_radio")
     st.divider()
     if st.button("CLEAR MEMORY & RESET"):
+        # Wipe the database if it exists
+        if os.path.exists(st.session_state['db_path']):
+            os.remove(st.session_state['db_path'])
         st.session_state.clear()
         st.rerun()
 
@@ -126,7 +130,6 @@ def safe_image(path, width=None):
         if width is not None:
             st.image(path, width=width)
         else:
-            # FIX: Using the legacy command for cross-version Docker compatibility
             st.image(path, use_column_width=True)
     else:
         st.info(f"Missing Image: Save your logo as '{path}' in the same folder.")
@@ -183,7 +186,7 @@ def generate_files(profile, severity, length=10):
     return files
 
 def robust_parse(content, vendor, format_type):
-    data = {"timestamp": None, "tool_id": "N/A", "vendor": vendor, "category": "SENSOR", "severity": "INFO", "value": 0.0, "metadata_payload": {}, "ai_summary": "", "rca_diagnosis": "N/A"}
+    data = {"timestamp": None, "tool_id": "N/A", "vendor": vendor, "category": "SENSOR", "severity": "INFO", "value": 0.0, "ai_summary": "", "rca_diagnosis": "N/A"}
 
     try:
         if format_type == "JSON":
@@ -259,7 +262,6 @@ if page == cfg.TITLE_COVER:
             
         st.write("<br><br>", unsafe_allow_html=True)
         
-        # --- UPDATED TEAM CREDITS ---
         st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px; letter-spacing: 2px;'>LEAD DEVELOPER</p>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; letter-spacing: 2px; font-size: 1.3rem; font-weight: 600; margin-top: 2px; margin-bottom: 15px;'>MUHAMMAD HAASHIR ISLAM</div>", unsafe_allow_html=True)
         
@@ -272,176 +274,56 @@ if page == cfg.TITLE_COVER:
 elif page == cfg.TITLE_SIMULATION:
     st.header("01 - DATA INGESTION ENGINE")
     
-    tab_synth, tab_ext = st.tabs(["SYNTHETIC GENERATION", "EXTERNAL ZERO-SHOT UPLOAD"])
+    st.write("Generate high-fidelity, format-diverse equipment logs for target vendors.")
     
-    # --- TAB 1: SYNTHETIC ---
-    with tab_synth:
-        st.write("Generate high-fidelity, format-diverse equipment logs for target vendors.")
+    c1, c2, c3 = st.columns(3)
+    profile = c1.selectbox("FAILURE PROFILE", ["Normal Ops", "Slow Leak", "Sudden Burst", "Ghost Fault"])
+    severity_val = c2.slider("FAILURE SEVERITY", cfg.SEVERITY_MIN, cfg.SEVERITY_MAX, cfg.SEVERITY_DEFAULT)
+    log_len = c3.slider("LOG LENGTH (CYCLES)", cfg.LOG_LENGTH_MIN, cfg.LOG_LENGTH_MAX, cfg.LOG_LENGTH_DEFAULT)
+    
+    if st.button("GENERATE SYNTHETIC PAYLOAD"):
+        with st.spinner("Compiling multi-format factory logs..."):
+            st.session_state['files'] = generate_files(profile, severity_val, log_len)
+            st.session_state['ai_cache'] = {}
+            st.session_state['macro_plan'] = ""
+            st.session_state['chat_history'] = []
+            st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL # Reset to baseline
+    
+    # Display the full logs ONLY if files have been generated
+    if st.session_state.get('files'):
+        st.success("SYNTHETIC DATA STREAMS GENERATED SUCCESSFULLY")
         
-        c1, c2, c3 = st.columns(3)
-        profile = c1.selectbox("FAILURE PROFILE", ["Normal Ops", "Slow Leak", "Sudden Burst", "Ghost Fault"])
-        severity_val = c2.slider("FAILURE SEVERITY", cfg.SEVERITY_MIN, cfg.SEVERITY_MAX, cfg.SEVERITY_DEFAULT)
-        log_len = c3.slider("LOG LENGTH (CYCLES)", cfg.LOG_LENGTH_MIN, cfg.LOG_LENGTH_MAX, cfg.LOG_LENGTH_DEFAULT)
-        
-        if st.button("GENERATE SYNTHETIC PAYLOAD"):
-            with st.spinner("Compiling multi-format factory logs..."):
-                st.session_state['files'] = generate_files(profile, severity_val, log_len)
-                st.session_state['results'] = [] 
-                st.session_state['ai_cache'] = {}
-                st.session_state['macro_plan'] = ""
-                st.session_state['chat_history'] = []
-                st.session_state['active_threshold'] = cfg.THRESHOLD_CRITICAL # Reset to baseline
-        
-        # Display the full logs ONLY if files have been generated
-        if st.session_state.get('files'):
-            st.success("SYNTHETIC DATA STREAMS GENERATED SUCCESSFULLY")
+        with st.expander("VIEW FULL SYNTHETIC PAYLOAD (ALL 12 FORMATS)", expanded=True):
+            tabs = st.tabs([
+                "JSON (A)", "JSON (B)", 
+                "XML (A)", "XML (B)", 
+                "CSV (A)", "CSV (B)", 
+                "TEXT (A)", "TEXT (B)", 
+                "SYSLOG (A)", "SYSLOG (B)", 
+                "KV (A)", "KV (B)"
+            ])
             
-            with st.expander("VIEW FULL SYNTHETIC PAYLOAD (ALL 12 FORMATS)", expanded=True):
-                # Create 12 tabs for all generated streams
-                tabs = st.tabs([
-                    "JSON (A)", "JSON (B)", 
-                    "XML (A)", "XML (B)", 
-                    "CSV (A)", "CSV (B)", 
-                    "TEXT (A)", "TEXT (B)", 
-                    "SYSLOG (A)", "SYSLOG (B)", 
-                    "KV (A)", "KV (B)"
-                ])
-                
-                with tabs[0]: st.code(json.dumps(st.session_state['files']['JSON_A'], indent=2), language="json")
-                with tabs[1]: st.code(json.dumps(st.session_state['files']['JSON_B'], indent=2), language="json")
-                
-                with tabs[2]: st.code(st.session_state['files']['XML_A_DISPLAY'], language="xml")
-                with tabs[3]: st.code(st.session_state['files']['XML_B_DISPLAY'], language="xml")
-                
-                with tabs[4]: st.code("timestamp,id,vendor,val,fw,status\n" + "\n".join(st.session_state['files']['CSV_A']), language="csv")
-                with tabs[5]: st.code("timestamp,machine_code,vendor,pressure_reading,ch,status\n" + "\n".join(st.session_state['files']['CSV_B']), language="csv")
-                
-                with tabs[6]: st.code("\n".join(st.session_state['files']['TEXT_A']), language="text")
-                with tabs[7]: st.code("\n".join(st.session_state['files']['TEXT_B']), language="text")
-                
-                with tabs[8]: st.code("\n".join(st.session_state['files']['SYS_A']), language="text")
-                with tabs[9]: st.code("\n".join(st.session_state['files']['SYS_B']), language="text")
-                
-                with tabs[10]: st.code("\n".join(st.session_state['files']['KV_A']), language="text")
-                with tabs[11]: st.code("\n".join(st.session_state['files']['KV_B']), language="text")
-
-            if st.button("PUSH TO FACTORY DASHBOARD"):
-                st.session_state['force_nav_dashboard'] = True
-                st.rerun()
-
-    # --- TAB 2: ZERO SHOT UPLOAD ---
-    with tab_ext:
-        st.write("Upload undocumented fab CSV logs. The AI will autonomously deduce the schema and map the columns.")
-        uploaded_file = st.file_uploader("DROP MYSTERY LOG FILE (CSV) HERE", type=["csv"])
-        
-        if uploaded_file is not None:
-            import io
-            raw_bytes = uploaded_file.getvalue()
+            with tabs[0]: st.code(json.dumps(st.session_state['files']['JSON_A'], indent=2), language="json")
+            with tabs[1]: st.code(json.dumps(st.session_state['files']['JSON_B'], indent=2), language="json")
             
-            try:
-                df_ext = pd.read_csv(io.BytesIO(raw_bytes))
-                headers = list(df_ext.columns)
-                sample_row = df_ext.iloc[0].astype(str).to_dict()
-                
-                st.markdown("**RAW SCHEMA DETECTED:**")
-                st.code(f"Headers: {headers}\nSample Row Data: {sample_row}", language="json")
-                
-                if st.button("INITIATE AUTONOMOUS SCHEMA MAPPING"):
-                    with st.spinner("AI deducing structural layout..."):
-                        
-                        mapping_prompt = f"""You are a strict data mapper. You must select the exact header names from the list below.
-Available Headers: {headers}
-Sample Data: {sample_row}
+            with tabs[2]: st.code(st.session_state['files']['XML_A_DISPLAY'], language="xml")
+            with tabs[3]: st.code(st.session_state['files']['XML_B_DISPLAY'], language="xml")
+            
+            with tabs[4]: st.code("timestamp,id,vendor,val,fw,status\n" + "\n".join(st.session_state['files']['CSV_A']), language="csv")
+            with tabs[5]: st.code("timestamp,machine_code,vendor,pressure_reading,ch,status\n" + "\n".join(st.session_state['files']['CSV_B']), language="csv")
+            
+            with tabs[6]: st.code("\n".join(st.session_state['files']['TEXT_A']), language="text")
+            with tabs[7]: st.code("\n".join(st.session_state['files']['TEXT_B']), language="text")
+            
+            with tabs[8]: st.code("\n".join(st.session_state['files']['SYS_A']), language="text")
+            with tabs[9]: st.code("\n".join(st.session_state['files']['SYS_B']), language="text")
+            
+            with tabs[10]: st.code("\n".join(st.session_state['files']['KV_A']), language="text")
+            with tabs[11]: st.code("\n".join(st.session_state['files']['KV_B']), language="text")
 
-Find the headers that best match these 3 categories:
-1. 'timestamp_col': The date/time column.
-2. 'eqp_col': The unique ID column (Prioritize 'Process_ID', 'Equipment_ID', or 'Wafer_ID').
-3. 'value_col': The primary metric (MUST be 'Vacuum_Pressure' if it exists, otherwise the main numerical value).
-
-Return ONLY a valid JSON object with exactly these 3 keys. Values must be exact strings from the Available Headers."""
-                        
-                        try:
-                            zs_resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": mapping_prompt, "stream": False, "format": "json"}, timeout=15)
-                            ai_map = json.loads(re.sub(r'```json|```', '', zs_resp.json().get("response", "")).strip())
-                            
-                            t_col = ai_map.get("timestamp_col", "UNKNOWN")
-                            e_col = ai_map.get("eqp_col", "UNKNOWN")
-                            v_col = ai_map.get("value_col", ai_map.get("vacuum_pressure_col", "UNKNOWN"))
-
-                            # --- TIMESTAMP VERIFIER & FALLBACK ---
-                            def is_valid_time(col):
-                                if col not in headers: return False
-                                try:
-                                    pd.to_datetime(sample_row.get(col))
-                                    return True
-                                except:
-                                    return False
-
-                            if not is_valid_time(t_col):
-                                t_col = next((h for h in headers if "time" in h.lower() or "date" in h.lower()), headers[0])
-                            
-                            if e_col not in headers:
-                                e_col = next((h for h in headers if "id" in h.lower() or "tool" in h.lower()), "UNKNOWN_TOOL")
-                            if v_col not in headers:
-                                v_col = next((h for h in headers if "pressure" in h.lower() or "val" in h.lower()), headers[-1])
-                            
-                            st.success(f"SCHEMA SUCCESSFULLY MAPPED: {{'timestamp_col': '{t_col}', 'eqp_col': '{e_col}', 'value_col': '{v_col}'}}")
-
-                            # --- ADAPTIVE Z-SCORE THRESHOLDING (3-Sigma) ---
-                            try:
-                                v_series = pd.to_numeric(df_ext[v_col], errors='coerce').dropna()
-                                if not v_series.empty:
-                                    v_mean = v_series.mean()
-                                    v_std = v_series.std()
-                                    # If standard deviation is 0, just add 20% to the mean to establish a safe threshold
-                                    active_thresh = round(v_mean + (3 * v_std), 3) if v_std > 0 else round(v_mean * 1.2, 3)
-                                else:
-                                    active_thresh = cfg.THRESHOLD_CRITICAL
-                            except Exception:
-                                active_thresh = cfg.THRESHOLD_CRITICAL
-                            
-                            st.session_state['active_threshold'] = active_thresh
-                            # -----------------------------------------------
-
-                            extracted_results = []
-                            for _, row in df_ext.iterrows():
-                                ts_val = str(row[t_col]) if t_col in df_ext.columns else datetime.datetime.now().isoformat()
-                                eqp_val = str(row[e_col]) if e_col in df_ext.columns else "UNKNOWN_TOOL"
-                                
-                                try:
-                                    val_val = float(row[v_col]) if v_col in df_ext.columns else 0.9
-                                except ValueError:
-                                    val_val = 0.9
-
-                                is_critical = val_val > active_thresh
-                                cat_val = "ALARM" if is_critical else "SENSOR"
-                                sev_val = "CRITICAL" if is_critical else "INFO"
-                                rca_val = f"Statistical Anomaly: Exceeds 3-Sigma threshold ({active_thresh})." if is_critical else "N/A"
-
-                                extracted_results.append({
-                                    "timestamp": ts_val,
-                                    "tool_id": eqp_val,
-                                    "vendor": "External_Vendor",
-                                    "category": cat_val,
-                                    "severity": sev_val,
-                                    "value": val_val,
-                                    "Confidence_Score": "100%",
-                                    "rca_diagnosis": rca_val
-                                })
-                            
-                            st.session_state['results'] = extracted_results
-                            st.session_state['files'] = None 
-                            st.session_state['macro_plan'] = ""
-                            st.session_state['chat_history'] = []
-                            
-                            st.session_state['force_nav_dashboard'] = True
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"Schema mapping failure. Ensure LLM is running. Error: {e}")
-            except Exception as e:
-                st.error(f"Could not read CSV file. {e}")
-
+        if st.button("PUSH TO FACTORY DASHBOARD"):
+            st.session_state['force_nav_dashboard'] = True
+            st.rerun()
 
 # ==========================================
 # PAGE 2: FACTORY DASHBOARD (The Frontend)
@@ -449,11 +331,19 @@ Return ONLY a valid JSON object with exactly these 3 keys. Values must be exact 
 elif page == cfg.TITLE_DASHBOARD:
     st.header(cfg.TITLE_DASHBOARD)
     
-    # Retrieve the dynamic threshold calculated during ingestion
     active_thresh = st.session_state.get('active_threshold', cfg.THRESHOLD_CRITICAL)
-    
     has_raw_files = st.session_state.get('files') is not None
-    has_processed_results = len(st.session_state.get('results', [])) > 0
+    
+    # 1. PULL DATA FROM SQLITE DATABASE INSTEAD OF MEMORY
+    try:
+        conn = sqlite3.connect(st.session_state['db_path'])
+        df = pd.read_sql_query("SELECT * FROM active_batch", conn)
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        conn.close()
+        has_processed_results = not df.empty
+    except Exception:
+        df = pd.DataFrame()
+        has_processed_results = False
     
     if not has_raw_files and not has_processed_results:
         st.warning("Awaiting data stream. Initiate generation sequence in the Simulation Engine.")
@@ -511,7 +401,7 @@ elif page == cfg.TITLE_DASHBOARD:
 
                 status_box = st.empty()
                 prog = st.progress(0)
-                results = []
+                temp_results = []
                 
                 start_time = time.time()
                 for i in range(batch):
@@ -534,7 +424,7 @@ elif page == cfg.TITLE_DASHBOARD:
                         base_a = formats_a[0]
                         base_a["value"] = mode_val_a
                         base_a["Confidence_Score"] = f"{conf_score_a}%"
-                        results.append(base_a)
+                        temp_results.append(base_a)
 
                     formats_b = [
                         robust_parse(st.session_state['files']['JSON_B'][idx], "Vendor B", "JSON"),
@@ -552,29 +442,40 @@ elif page == cfg.TITLE_DASHBOARD:
                         base_b = formats_b[0]
                         base_b["value"] = mode_val_b
                         base_b["Confidence_Score"] = f"{conf_score_b}%"
-                        results.append(base_b)
+                        temp_results.append(base_b)
                     
                     prog.progress((i + 1) / batch)
 
                 timer_container.success(f"NORMALIZATION & FUSION COMPLETE [{time.time() - start_time:.2f}s]")
                 status_box.empty()
-                st.session_state['results'] = results
+                
+                # --- SQLITE STORAGE OVERRIDE (Replaces minified memory list) ---
+                df_to_save = pd.DataFrame(temp_results)
+                # Convert complex objects to JSON strings so SQLite doesn't crash
+                for col in df_to_save.columns:
+                    if df_to_save[col].apply(lambda x: isinstance(x, (dict, list))).any():
+                        df_to_save[col] = df_to_save[col].apply(lambda x: json.dumps(x) if isinstance(x, (dict, list)) else x)
+                
+                conn = sqlite3.connect(st.session_state['db_path'])
+                df_to_save.to_sql("active_batch", conn, if_exists="replace", index=False)
+                conn.close()
+
                 st.session_state['macro_plan'] = "" 
                 st.session_state['chat_history'] = []
+                st.session_state['files'] = None # Clear memory
 
-        if has_processed_results or (has_raw_files and st.session_state['results']):
-            df = pd.DataFrame(st.session_state['results'])
+                st.rerun()
+
+        if has_processed_results:
             df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', errors='coerce', utc=True)
             
             # --- GRAPH RESILIENCE: Drop unparseable dates to prevent graph from breaking ---
             df = df.dropna(subset=['timestamp']).sort_values('timestamp', ascending=True)
-            df['value'] = pd.to_numeric(df['value'], errors='coerce')
 
             df['baseline'] = df.groupby('vendor')['value'].transform(lambda x: x.rolling(window=3, min_periods=1).mean().shift(1).fillna(cfg.BASELINE_DEFAULT))
             drift_condition = (abs(df['value'] - df['baseline']) / df['baseline'] > cfg.DRIFT_TOLERANCE) & (df['value'] <= active_thresh)
             df['drift_warning'] = drift_condition.map({True: "Drift Detected", False: "Nominal"})
             
-            # Use dynamic active_thresh for yield calculation
             df['yield_scrap_est'] = df.apply(lambda row: round((row['value'] - active_thresh) * cfg.YIELD_SCRAP_COEF, 1) if row['category'] == 'ALARM' else 0, axis=1)
 
             st.subheader("DYNAMIC DRIFT & ANOMALY MATRIX")
@@ -592,7 +493,6 @@ elif page == cfg.TITLE_DASHBOARD:
                                              marker=dict(color=cfg.COLOR_WARN_AMBER, size=12, line=dict(color=cfg.COLOR_DANGER_RED, width=2)), 
                                              name=f"{vendor} Critical Event"))
 
-            # Dynamic Horizontal Line Placement based on the adaptive threshold
             fig.add_hline(y=active_thresh, line_dash="dash", line_color=cfg.COLOR_DANGER_RED, annotation_text=f"CRITICAL ACTION THRESHOLD ({active_thresh})")
             fig.update_layout(template="plotly_dark", plot_bgcolor=cfg.COLOR_BG_PRIMARY, paper_bgcolor=cfg.COLOR_BG_PRIMARY, xaxis_title="TIMESTAMP", yaxis_title="METRIC VALUE", height=500)
             st.plotly_chart(fig, use_container_width=True)
@@ -649,11 +549,14 @@ elif page == cfg.TITLE_DASHBOARD:
             }
             
             df_display = df.rename(columns=display_mapping)
-            cols = list(display_mapping.values())
+            cols = [c for c in list(display_mapping.values()) if c in df_display.columns]
             df_display = df_display.reindex(columns=cols).fillna("N/A")
             
             c_table, c_btn = st.columns([8, 1])
-            c_table.dataframe(df_display, use_container_width=True)
+            
+            # Replaced the interactive React grid with a static, crash-proof HTML table
+            c_table.table(df_display.head(100)) 
+            
             csv = df_display.to_csv(index=False).encode('utf-8')
             c_btn.download_button("EXPORT CSV", data=csv, file_name="normalized_fab_logs.csv", mime="text/csv")
 
@@ -662,13 +565,11 @@ elif page == cfg.TITLE_DASHBOARD:
             st.subheader(cfg.TITLE_COPILOT)
             st.caption("Query normalized data vectors or ask general knowledge questions.")
 
-            # Render existing chat history
             for msg in st.session_state['chat_history']:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
             if user_q := st.chat_input("Enter diagnostic query or general question..."):
-                # Append user question to UI
                 st.session_state['chat_history'].append({"role": "user", "content": user_q})
                 with st.chat_message("user"): 
                     st.markdown(user_q)
@@ -676,33 +577,30 @@ elif page == cfg.TITLE_DASHBOARD:
                 with st.chat_message("assistant"):
                     with st.spinner("Analyzing parameters..."):
                         
-                        # Build the contextual factory data
                         context_blocks = []
                         context_blocks.append("=== SYSTEM-WIDE ANALYTICS (REAL-TIME) ===")
                         context_blocks.append(f"Current Tool Availability: {availability:.1f}%")
                         context_blocks.append(f"Predictive Drift Events Flagged: {drift_count}")
-                        if has_raw_files:
-                            context_blocks.append(f"Current Batch Size: {batch} time steps")
                         context_blocks.append(f"Estimated Wafer Scrap: {scrap_est:.1f} Units")
                         context_blocks.append(f"Estimated Financial Loss: ${scrap_est * cfg.WAFER_UNIT_COST:,.2f}") 
                         context_blocks.append(f"Action Threshold: {active_thresh:.2f}")
                         context_blocks.append("=========================================\n")
 
-                        alarm_rows = df_display[df_display['CEID_Class'] == 'ALARM']
-                        if alarm_rows.empty:
-                            context_blocks.append("No critical alarms detected in this batch.")
-                        else:
-                            unique_alarms = alarm_rows.drop_duplicates(subset=['Timestamp', 'Vendor'])
-                            for _, row in unique_alarms.iterrows():
-                                context_blocks.append(f"At exact time {row['Timestamp']}, {row['Vendor']} (Tool: {row['EQP_ID']}) triggered an ALARM with metric spiking to {row['SVID_Value']}. Root cause: {row['FDC_Diagnosis']}.")
-                        
-                        info_rows = df_display[df_display['CEID_Class'] == 'INFO']
-                        if not info_rows.empty:
-                            context_blocks.append(f"There were {len(info_rows)} normal operational events recorded.")
+                        if 'CEID_Class' in df_display.columns:
+                            alarm_rows = df_display[df_display['CEID_Class'] == 'ALARM']
+                            if alarm_rows.empty:
+                                context_blocks.append("No critical alarms detected in this batch.")
+                            else:
+                                unique_alarms = alarm_rows.drop_duplicates(subset=['Timestamp', 'Vendor'])
+                                for _, row in unique_alarms.iterrows():
+                                    context_blocks.append(f"At exact time {row['Timestamp']}, {row['Vendor']} (Tool: {row['EQP_ID']}) triggered an ALARM with metric spiking to {row['SVID_Value']}. Root cause: {row['FDC_Diagnosis']}.")
+                            
+                            info_rows = df_display[df_display['CEID_Class'] == 'INFO']
+                            if not info_rows.empty:
+                                context_blocks.append(f"There were {len(info_rows)} normal operational events recorded.")
 
                         clean_context = "\n".join(context_blocks)
                         
-                        # --- THE DUAL-MODE PROMPT ---
                         copilot_prompt = f"""You are the advanced Fab Diagnostic AI Copilot. You are highly intelligent, helpful, and conversational.
 
 === LIVE FACTORY DATA STREAM ===
@@ -718,7 +616,6 @@ INSTRUCTIONS:
 """
                         
                         try:
-                            # Temperature raised to 0.5 to allow for conversational flexibility
                             resp = requests.post(cfg.OLLAMA_URL, json={
                                 "model": cfg.MODEL_NAME, 
                                 "prompt": copilot_prompt, 
@@ -726,10 +623,8 @@ INSTRUCTIONS:
                                 "options": {"temperature": 0.5}
                             }, timeout=15)
                             
-                            # Safely extract the response and strip whitespace
                             answer = resp.json().get("response", "").strip()
                             
-                            # --- THE FAILSAFE SHIELD ---
                             if not answer:
                                 answer = "I processed your request, but my logic core returned an empty response. Could you try rephrasing that?"
                             
