@@ -3,7 +3,7 @@ import os
 # INFRASTRUCTURE
 #  OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost"); print(OLLAMA_HOST)
 OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
-MODEL_NAME = "llama3"
+MODEL_NAME = "llama3:latest"
 
 # UI AESTHETICS (NOCTILUCENT THEME)
 PAGE_TITLE = "Noctilucent Intelligence Suite"

@@ -623,10 +623,17 @@ INSTRUCTIONS:
                                 "options": {"temperature": 0.5}
                             }, timeout=15)
                             
-                            answer = resp.json().get("response", "").strip()
-                            
+                            resp_json = resp.json()
+                            answer = (
+                                resp_json.get("response") or
+                                resp_json.get("message", {}).get("content") or
+                                resp_json.get("content") or
+                                ""
+                            ).strip()
+
                             if not answer:
-                                answer = "I processed your request, but my logic core returned an empty response. Could you try rephrasing that?"
+                                error_detail = resp_json.get("error", "unknown error")
+                                answer = f"Ollama error: {error_detail}"
                             
                             st.markdown(answer)
                             st.session_state['chat_history'].append({"role": "assistant", "content": answer})
