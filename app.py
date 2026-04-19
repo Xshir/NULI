@@ -224,7 +224,7 @@ def robust_parse(content, vendor, format_type):
         data.update({"category": "ALARM", "severity": "CRITICAL"})
         try:
             prompt = f"Analyze anomaly: {content}. Return STRICT JSON with 'ai_summary' (one technical sentence) and 'rca_diagnosis' (e.g. 'Seal degradation in C1')."
-            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"}, timeout=8)
+            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"}, timeout=60)
             ai_res = json.loads(re.sub(r'```json|```', '', resp.json().get("response", "")).strip())
             data["ai_summary"] = ai_res.get("ai_summary", "Critical vacuum fault.")
             data["rca_diagnosis"] = ai_res.get("rca_diagnosis", "Hardware failure.")
@@ -506,7 +506,7 @@ elif page == cfg.TITLE_DASHBOARD:
                         faults = " | ".join(alarms_df['rca_diagnosis'].astype(str).tolist())
                         prompt = f"You are a fab manager. Based on these concurrent faults: [{faults}], generate a concise, 3-step physical mitigation plan for the floor technicians. Do not use markdown."
                         try:
-                            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False}, timeout=15)
+                            resp = requests.post(cfg.OLLAMA_URL, json={"model": cfg.MODEL_NAME, "prompt": prompt, "stream": False}, timeout=60)
                             st.session_state['macro_plan'] = resp.json().get("response", "Error generating plan.")
                         except Exception:
                             st.session_state['macro_plan'] = "Macro Plan generation timed out. Local LLM may be busy."
@@ -621,7 +621,7 @@ INSTRUCTIONS:
                                 "prompt": copilot_prompt, 
                                 "stream": False,
                                 "options": {"temperature": 0.5}
-                            }, timeout=15)
+                            }, timeout=60)
                             
                             resp_json = resp.json()
                             answer = (
