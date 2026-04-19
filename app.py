@@ -266,7 +266,7 @@ if page == cfg.TITLE_COVER:
         st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; letter-spacing: 2px; font-size: 1.3rem; font-weight: 600; margin-top: 2px; margin-bottom: 15px;'>MUHAMMAD HAASHIR ISLAM</div>", unsafe_allow_html=True)
         
         st.markdown(f"<p style='text-align: center; color: {cfg.COLOR_TEXT_MAIN}; font-family: {cfg.FONT_MONO}; font-size: 0.8rem; margin-bottom: 0px; letter-spacing: 2px;'>PROJECT MEMBERS</p>", unsafe_allow_html=True)
-        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; font-size: 1rem; font-weight: 400; margin-top: 2px; letter-spacing: 1px;'>CHARLENE TAN YING JIE<br>GABRIEL LIM JUN HONG</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; color: {cfg.COLOR_ACCENT_PLATINUM}; font-size: 1rem; font-weight: 400; margin-top: 2px; letter-spacing: 1px;'>CHARLENE TAN YING JIE<br>GABRIEL LIM JUN HONG<br>AVRIL MICHELLINA (TP BME)</div>", unsafe_allow_html=True)
 
 # ==========================================
 # PAGE 1: DATA INGESTION ENGINE
